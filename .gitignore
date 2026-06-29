@@ -1,12 +1,13 @@
+
+__pycache__/
+.coverage
 .env
 .ovh_ai_token
-*.pid
-__pycache__/
-*.pyc
 *.log
+*.pid
+*.pyc
 dogfeed_*.jsonl
 dogfeed_parallel/
 hf_upload_staging/
 node_modules/
 test_p*.jsonl
-
