@@ -10,6 +10,7 @@ jobs:
   test:
     name: Test (Python ${{ matrix.python-version }} on ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    environment: ci-peter
     strategy:
       fail-fast: false
       matrix:
@@ -37,7 +38,9 @@ jobs:
         run: uv run mypy src/ --ignore-missing-imports
 
       - name: Test (pytest + coverage)
-        run: uv run pytest --cov=src/ultrawhale --cov-report=xml --cov-report=term-missing -m "not requires_hf_token"
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: uv run pytest --cov=src/ultrawhale --cov-report=xml --cov-report=term-missing
 
       - name: Verify package build
         run: uv build
