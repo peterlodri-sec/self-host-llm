@@ -6,8 +6,6 @@ final quality — all pure functions with no side effects.
 """
 
 import hashlib
-from typing import Tuple
-
 
 # Default quality thresholds (overridable via Config)
 QUALITY_THRESHOLDS = {
@@ -33,7 +31,7 @@ def token_count(text: str) -> int:
     return len(text.split())
 
 
-def calculate_quality_score(question: str, answer: str, topic: str = "") -> Tuple[float, dict]:
+def calculate_quality_score(question: str, answer: str, topic: str = "") -> tuple[float, dict]:
     """Score a Q&A pair on coherence, length, and diversity (0.0–1.0).
 
     Args:
@@ -49,8 +47,14 @@ def calculate_quality_score(question: str, answer: str, topic: str = "") -> Tupl
     q_tokens = token_count(question)
     a_tokens = token_count(answer)
 
-    q_len = 1.0 if (QUALITY_THRESHOLDS["min_question_tokens"] <= q_tokens <= QUALITY_THRESHOLDS["max_question_tokens"]) else 0.3
-    a_len = 1.0 if (QUALITY_THRESHOLDS["min_answer_tokens"] <= a_tokens <= QUALITY_THRESHOLDS["max_answer_tokens"]) else 0.4
+    q_len = (
+        1.0
+        if (QUALITY_THRESHOLDS["min_question_tokens"] <= q_tokens <= QUALITY_THRESHOLDS["max_question_tokens"])
+        else 0.3
+    )
+    a_len = (
+        1.0 if (QUALITY_THRESHOLDS["min_answer_tokens"] <= a_tokens <= QUALITY_THRESHOLDS["max_answer_tokens"]) else 0.4
+    )
 
     length_score = (q_len * 0.4) + (a_len * 0.6)
     scores["length"] = length_score

@@ -5,8 +5,9 @@
 Migrated from self-host-llm/curation_engine.py into the ultrawhale package.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
+from ultrawhale.config import Config
 from ultrawhale.hf import HFInferenceClient
 from ultrawhale.logging import get_logger
 
@@ -20,7 +21,7 @@ class CurationEngine:
     sandboxed code verification for Q&A pairs that contain code blocks.
     """
 
-    def __init__(self, token: Optional[str] = None) -> None:
+    def __init__(self, token: str | None = None) -> None:
         """Initialize the curation engine.
 
         Args:
@@ -34,7 +35,7 @@ class CurationEngine:
     # Judgement
     # ------------------------------------------------------------------
 
-    def judge_pair(self, qa_pair: Dict[str, Any]) -> float:
+    def judge_pair(self, qa_pair: dict[str, Any]) -> float:
         """Rate a Q&A pair for accuracy and quality on a scale of 1-5.
 
         Uses LLM-as-a-Judge via the HF Inference API. On any failure the
@@ -50,15 +51,10 @@ class CurationEngine:
         question = qa_pair.get("user_message", "")
         answer = qa_pair.get("free_response", "")
         prompt = (
-            f"Rate this Q&A pair for accuracy and quality (1-5). "
-            f"Output only the number.\n"
-            f"Q: {question}\n"
-            f"A: {answer}"
+            f"Rate this Q&A pair for accuracy and quality (1-5). Output only the number.\nQ: {question}\nA: {answer}"
         )
         logger.debug("Judging Q&A pair (question length=%d)", len(question))
-        score_str: Optional[str] = self.client._chat(
-            [{"role": "user", "content": prompt}], "llama70b", max_tokens=10
-        )
+        score_str: str | None = self.client._chat([{"role": "user", "content": prompt}], "llama70b", max_tokens=10)
         try:
             score = float(score_str.strip()) if score_str else 3.0
         except (ValueError, AttributeError):
@@ -71,7 +67,7 @@ class CurationEngine:
     # Code verification
     # ------------------------------------------------------------------
 
-    def verify_code(self, qa_pair: Dict[str, Any]) -> bool:
+    def verify_code(self, qa_pair: dict[str, Any]) -> bool:
         """Verify Python code snippets via sandboxed execution.
 
         Currently a placeholder: logs a warning when Python code blocks are
@@ -97,7 +93,7 @@ class CurationEngine:
     # Full curation pipeline
     # ------------------------------------------------------------------
 
-    def curate(self, qa_pair: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def curate(self, qa_pair: dict[str, Any]) -> dict[str, Any] | None:
         """Run the full curation pipeline (judgement then code verification).
 
         ``judge_pair`` is called first. If the score is below the
@@ -113,11 +109,10 @@ class CurationEngine:
             added if the pair passes both phases, or ``None`` if rejected.
         """
         score: float = self.judge_pair(qa_pair)
+        threshold = Config().curation_threshold
 
-        if score < 4.0:
-            logger.info(
-                "Pair rejected — score %.1f below threshold 4.0", score
-            )
+        if score < threshold:
+            logger.info("Pair rejected — score %.1f below threshold %.1f", score, threshold)
             return None
 
         if not self.verify_code(qa_pair):

@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: MIT
 """Tests for quality scoring functions."""
 
-import pytest
 from ultrawhale.scoring import (
     calculate_quality_score,
-    token_count,
     reset_seen_hashes,
-    QUALITY_THRESHOLDS,
+    token_count,
 )
 
 
@@ -29,8 +27,11 @@ class TestQualityScoring:
         reset_seen_hashes()
 
     def test_perfect_pair_scores_high(self):
-        question = "What is the time complexity of binary search and how does it compare to linear search?"
-        answer = "Binary search has O(log n) time complexity, while linear search is O(n). Binary search requires a sorted array and repeatedly divides the search interval in half."
+        question = "What is the time complexity of binary search compared to linear search?"
+        answer = (
+            "Binary search has O(log n) time complexity, while linear search is O(n). "
+            "It requires a sorted array and repeatedly divides the search interval in half."
+        )
         score, breakdown = calculate_quality_score(question, answer, "algorithms")
         assert score > 0.7, f"Expected high score, got {score}: {breakdown}"
 
@@ -72,12 +73,11 @@ class TestQualityScoring:
 
         reset_seen_hashes()
         score_without, bd_without = calculate_quality_score(
-            "what is a hash table",
-            "a data structure that maps keys to values using a hash function",
-            "algorithms"
+            "what is a hash table", "a data structure that maps keys to values using a hash function", "algorithms"
         )
-        assert bd_without["coherence"] < bd_with["coherence"], \
+        assert bd_without["coherence"] < bd_with["coherence"], (
             f"No punctuation should reduce coherence: with={bd_with['coherence']}, without={bd_without['coherence']}"
+        )
 
     def test_answer_shorter_than_question_penalized(self):
         q = "Explain the difference between TCP and UDP in detail including their use cases and tradeoffs."

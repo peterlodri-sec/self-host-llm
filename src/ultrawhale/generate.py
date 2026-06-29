@@ -6,22 +6,20 @@ difficulty-aware sampling, and curated quality gating.
 """
 
 import json
-import sys
-import uuid
 import os
-import hashlib
 import queue
+import random
+import sys
 import threading
 import time
-from datetime import datetime, timezone
-from typing import Optional, Tuple
+import uuid
+from datetime import UTC, datetime
 
 from ultrawhale.config import Config
 from ultrawhale.logging import get_logger
 from ultrawhale.scoring import (
     QUALITY_THRESHOLDS,
     calculate_quality_score,
-    reset_seen_hashes,
 )
 
 logger = get_logger("generate")
@@ -36,6 +34,7 @@ except ImportError:
 HF_AVAILABLE = False
 try:
     from ultrawhale.hf import HFInferenceClient
+
     HF_AVAILABLE = True
 except ImportError:
     logger.debug("HF inference not available — hybrid/HF-only modes disabled")
@@ -43,36 +42,65 @@ except ImportError:
 DIFFICULTY_AVAILABLE = False
 try:
     from ultrawhale.difficulty import (
-        select_difficulty,
-        get_question_type_for_difficulty,
         ActiveLearningTracker,
+        get_question_type_for_difficulty,
+        select_difficulty,
     )
+
     DIFFICULTY_AVAILABLE = True
 except ImportError:
     logger.debug("Difficulty sampling not available — use --difficulty to enable")
 
 # --- Topic definitions ---
 TOPICS_ALL = [
-    "coding fundamentals", "algorithms", "data structures",
-    "system design", "software architecture", "distributed systems",
-    "machine learning", "deep learning", "computer science theory",
-    "complexity theory", "cryptography", "compiler design",
-    "operating systems", "databases", "networking",
-    "SOTA research papers", "thesis research", "academic theories",
+    "coding fundamentals",
+    "algorithms",
+    "data structures",
+    "system design",
+    "software architecture",
+    "distributed systems",
+    "machine learning",
+    "deep learning",
+    "computer science theory",
+    "complexity theory",
+    "cryptography",
+    "compiler design",
+    "operating systems",
+    "databases",
+    "networking",
+    "SOTA research papers",
+    "thesis research",
+    "academic theories",
 ]
 
 TOPICS_CS_THEORY = [
-    "algorithms", "data structures", "computer science theory",
-    "complexity theory", "cryptography", "compiler design",
-    "operating systems", "automata theory", "formal languages",
-    "computability theory", "SOTA research papers", "thesis research in CS",
+    "algorithms",
+    "data structures",
+    "computer science theory",
+    "complexity theory",
+    "cryptography",
+    "compiler design",
+    "operating systems",
+    "automata theory",
+    "formal languages",
+    "computability theory",
+    "SOTA research papers",
+    "thesis research in CS",
 ]
 
 TOPICS_PHYSICS = [
-    "quantum mechanics", "relativity theory", "quantum field theory",
-    "statistical mechanics", "particle physics", "string theory",
-    "cosmology", "astrophysics", "condensed matter physics",
-    "quantum computing theory", "SOTA physics research", "theoretical physics thesis",
+    "quantum mechanics",
+    "relativity theory",
+    "quantum field theory",
+    "statistical mechanics",
+    "particle physics",
+    "string theory",
+    "cosmology",
+    "astrophysics",
+    "condensed matter physics",
+    "quantum computing theory",
+    "SOTA physics research",
+    "theoretical physics thesis",
 ]
 
 TOPIC_CATEGORIES = {
@@ -83,7 +111,10 @@ TOPIC_CATEGORIES = {
 }
 
 QUESTION_PROMPTS = {
-    "conceptual": "Generate a clear, fundamental question about {topic} suitable for CS students learning the basics. Focus on core concepts.",
+    "conceptual": (
+        "Generate a clear, fundamental question about {topic} suitable for CS "
+        "students learning the basics. Focus on core concepts."
+    ),
     "practical": "Generate a practical coding question related to {topic} with clear requirements and expected output.",
     "theoretical": "Generate a theoretical question about {topic} for advanced study or research.",
     "comparison": "Generate a comparison question contrasting two related concepts or approaches in {topic}.",
@@ -99,8 +130,7 @@ def _truncate(text: str, max_len: int = 60) -> str:
 
 def _backoff_delay(attempt: int, base: float = 1.0, max_delay: float = 16.0) -> float:
     """Exponential backoff with jitter."""
-    import random
-    delay = min(base * (2 ** attempt), max_delay)
+    delay = min(base * (2**attempt), max_delay)
     return delay * (0.5 + random.random())
 
 
@@ -110,7 +140,7 @@ def generate_qa_pair(
     topic: str,
     question_type: str = "conceptual",
     retries: int = 2,
-) -> Optional[Tuple[dict, float]]:
+) -> tuple[dict, float] | None:
     """Generate single Q&A pair with retry logic and quality scoring.
 
     Args:
@@ -170,7 +200,7 @@ def generate_qa_pair(
                 "free_response": answer,
                 "free_model": f"mistralrs/{model}",
                 "deepseek_response": "",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "session_id": str(uuid.uuid4())[:8],
                 "topic": topic,
                 "format": "qa-pair",
@@ -203,7 +233,7 @@ def generate_qa_pair_hybrid(
     question_type: str = "conceptual",
     use_hf_fallback: bool = False,
     hf_client=None,
-) -> Optional[Tuple[dict, float]]:
+) -> tuple[dict, float] | None:
     """Generate Q&A pair with HF Inference fallback on low quality.
 
     Tries local LLM first; if score is below threshold, falls back to HF.
@@ -219,7 +249,7 @@ def generate_qa_pair_hybrid(
     if use_hf_fallback and hf_client and HF_AVAILABLE:
         try:
             logger.info("Generating via HF Inference (llama70b)...")
-            qa = hf_client.generate_qa_pair(topic, question_type, "llama70b")
+            qa = hf_client.generate_qa_pair(topic, question_type, "llama8b")
             if qa:
                 question, answer = qa
                 score, _breakdown = calculate_quality_score(question, answer, topic)
@@ -232,12 +262,15 @@ def generate_qa_pair_hybrid(
                         "free_response": answer,
                         "free_model": "hf-inference/llama-70b",
                         "deepseek_response": "",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                         "session_id": str(uuid.uuid4())[:8],
                         "topic": topic,
                         "format": "qa-pair",
-                        "pov": "", "capabilities": "", "space_node": "",
-                        "memory_ref": "", "enriched_at": "",
+                        "pov": "",
+                        "capabilities": "",
+                        "space_node": "",
+                        "memory_ref": "",
+                        "enriched_at": "",
                         "pipeline": "hybrid-phase2-hf-fallback",
                         "quality_score": round(score, 3),
                     }
@@ -252,8 +285,8 @@ def generate_qa_pair_hf_only(
     hf_client,
     topic: str,
     question_type: str = "conceptual",
-    model_key: str = "llama70b",
-) -> Optional[Tuple[dict, float]]:
+    model_key: str = "llama8b",
+) -> tuple[dict, float] | None:
     """Generate Q&A pair via HF Inference only (no local LLM)."""
     try:
         qa = hf_client.generate_qa_pair(topic, question_type, model_key)
@@ -270,12 +303,15 @@ def generate_qa_pair_hf_only(
             "free_response": answer,
             "free_model": f"hf-inference/{model_key}",
             "deepseek_response": "",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "session_id": str(uuid.uuid4())[:8],
             "topic": topic,
             "format": "qa-pair",
-            "pov": "", "capabilities": "", "space_node": "",
-            "memory_ref": "", "enriched_at": "",
+            "pov": "",
+            "capabilities": "",
+            "space_node": "",
+            "memory_ref": "",
+            "enriched_at": "",
             "pipeline": "hf-only-phase2",
             "quality_score": round(score, 3),
         }
@@ -387,6 +423,7 @@ def generate_dataset(
     if not skip_curation and cfg.hf_token:
         try:
             from ultrawhale.curation import CurationEngine
+
             curator = CurationEngine(cfg.hf_token)
             logger.info("Curation engine enabled (LLM-judge scoring)")
         except Exception as e:
@@ -407,8 +444,12 @@ def generate_dataset(
             result = generate_qa_pair_hf_only(hf_client, topic, q_type)
         elif hybrid_mode:
             result = generate_qa_pair_hybrid(
-                client, model, topic, q_type,
-                use_hf_fallback=True, hf_client=hf_client,
+                client,
+                model,
+                topic,
+                q_type,
+                use_hf_fallback=True,
+                hf_client=hf_client,
             )
         else:
             result = generate_qa_pair(client, model, topic, q_type, retries=2)
@@ -471,12 +512,15 @@ if __name__ == "__main__":
     parser.add_argument("--num", type=int, default=100, help="Number of Q&A pairs")
     parser.add_argument("--output", default="dogfeed.jsonl", help="Output JSONL file")
     parser.add_argument("--host", default="http://localhost:8080", help="LLM server URL")
-    parser.add_argument("--category", default="all", choices=list(TOPIC_CATEGORIES.keys()),
-                        help=f"Topic category: {', '.join(TOPIC_CATEGORIES.keys())}")
+    parser.add_argument(
+        "--category",
+        default="all",
+        choices=list(TOPIC_CATEGORIES.keys()),
+        help=f"Topic category: {', '.join(TOPIC_CATEGORIES.keys())}",
+    )
     parser.add_argument("--hybrid", action="store_true", help="Use HF Inference as fallback")
     parser.add_argument("--difficulty", action="store_true", help="Enable difficulty-aware sampling")
-    parser.add_argument("--hf-only", action="store_true", dest="hf_only",
-                        help="Skip local LLM, use HF Inference only")
+    parser.add_argument("--hf-only", action="store_true", dest="hf_only", help="Skip local LLM, use HF Inference only")
     parser.add_argument("--skip-curation", action="store_true", help="Skip LLM-judge curation")
 
     args = parser.parse_args()

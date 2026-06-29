@@ -13,7 +13,6 @@ package structure with hardening applied:
 from __future__ import annotations
 
 import random
-from typing import Optional
 
 from ultrawhale.logging import get_logger
 
@@ -25,13 +24,25 @@ logger = get_logger("difficulty")
 
 DIFFICULTY_PROMPTS: dict[str, dict[str, str]] = {
     "easy": {
-        "conceptual": "Generate a simple, foundational question about {topic} for beginners. Focus on basic definitions and concepts. Keep it accessible.",
-        "practical": "Generate a simple coding question about {topic} with clear, basic requirements. Suitable for learners.",
+        "conceptual": (
+            "Generate a simple, foundational question about {topic} for beginners. "
+            "Focus on basic definitions and concepts. Keep it accessible."
+        ),
+        "practical": (
+            "Generate a simple coding question about {topic} with clear, basic "
+            "requirements. Suitable for learners."
+        ),
         "definition": "Generate a question asking to define a fundamental concept in {topic} in simple terms.",
     },
     "medium": {
-        "conceptual": "Generate a moderate-difficulty question about {topic} that explores concepts and relationships. Suitable for intermediate learners.",
-        "practical": "Generate a practical coding problem about {topic} with moderate complexity and clear requirements.",
+        "conceptual": (
+            "Generate a moderate-difficulty question about {topic} that explores "
+            "concepts and relationships. Suitable for intermediate learners."
+        ),
+        "practical": (
+            "Generate a practical coding problem about {topic} with moderate "
+            "complexity and clear requirements."
+        ),
         "comparison": "Generate a comparison question contrasting two related concepts in {topic}.",
     },
     "hard": {
@@ -54,7 +65,7 @@ DIFFICULTY_DISTRIBUTION: dict[str, float] = {
 _rng = random.Random()
 
 
-def select_difficulty(seed: Optional[int] = None) -> str:
+def select_difficulty(seed: int | None = None) -> str:
     """Sample difficulty level based on distribution.
 
     Parameters
@@ -78,7 +89,7 @@ def select_difficulty(seed: Optional[int] = None) -> str:
     return "hard"
 
 
-def get_question_type_for_difficulty(difficulty: str, seed: Optional[int] = None) -> str:
+def get_question_type_for_difficulty(difficulty: str, seed: int | None = None) -> str:
     """Select a question type appropriate for *difficulty*.
 
     Parameters
@@ -100,7 +111,7 @@ def get_question_type_for_difficulty(difficulty: str, seed: Optional[int] = None
 def get_prompt_for_difficulty(
     topic: str,
     difficulty: str,
-    question_type: Optional[str] = None,
+    question_type: str | None = None,
 ) -> str:
     """Return the prompt template for *difficulty* / *question_type*.
 
@@ -129,6 +140,7 @@ def get_prompt_for_difficulty(
 # ---------------------------------------------------------------------------
 # Active-learning tracker
 # ---------------------------------------------------------------------------
+
 
 class ActiveLearningTracker:
     """Track generation success/feedback by difficulty level.
@@ -196,7 +208,7 @@ class ActiveLearningTracker:
 
     # -- query ------------------------------------------------------------
 
-    def get_success_rate(self, topic: Optional[str] = None, difficulty: Optional[str] = None) -> float:
+    def get_success_rate(self, topic: str | None = None, difficulty: str | None = None) -> float:
         """Return the observed success rate for *topic* at *difficulty*.
 
         When both arguments are ``None`` (default) the overall rate is
@@ -211,9 +223,7 @@ class ActiveLearningTracker:
         if difficulty:
             entries = self.stats.get(difficulty, {}).values()
         else:
-            entries = [
-                v for d in self.stats.values() for v in d.values()
-            ]
+            entries = [v for d in self.stats.values() for v in d.values()]
 
         successes = sum(e.get("success", 0) for e in entries)
         totals = sum(e.get("total", 0) for e in entries)
@@ -231,10 +241,7 @@ class ActiveLearningTracker:
         """
         avg_success: dict[str, float] = {}
         for difficulty in ("easy", "medium", "hard"):
-            rates = [
-                s.get("success", 0) / s.get("total", 1)
-                for s in self.stats[difficulty].values()
-            ]
+            rates = [s.get("success", 0) / s.get("total", 1) for s in self.stats[difficulty].values()]
             avg_success[difficulty] = sum(rates) / len(rates) if rates else 0.5
 
         new_dist = dict(DIFFICULTY_DISTRIBUTION)
@@ -269,10 +276,7 @@ class ActiveLearningTracker:
                 total: int = stat["total"]  # type: ignore[assignment]
                 success: int = stat["success"]  # type: ignore[assignment]
                 rate = success / total if total else 0.0
-                lines.append(
-                    f"  {topic}: {success}/{total} success ({rate:.1%}), "
-                    f"avg_score={stat['avg_score']:.3f}"
-                )
+                lines.append(f"  {topic}: {success}/{total} success ({rate:.1%}), avg_score={stat['avg_score']:.3f}")
         return "\n".join(lines)
 
 

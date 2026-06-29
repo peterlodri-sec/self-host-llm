@@ -2,12 +2,13 @@
 """Tests for difficulty sampling and active learning."""
 
 import pytest
+
 from ultrawhale.difficulty import (
-    select_difficulty,
-    get_question_type_for_difficulty,
-    get_prompt_for_difficulty,
-    ActiveLearningTracker,
     DIFFICULTY_DISTRIBUTION,
+    ActiveLearningTracker,
+    get_prompt_for_difficulty,
+    get_question_type_for_difficulty,
+    select_difficulty,
 )
 
 
@@ -36,6 +37,7 @@ class TestDifficultySelection:
     def test_no_global_seed_side_effect(self):
         """Calling select_difficulty with seed should not affect subsequent unseeded calls."""
         import random
+
         random.seed(0)
         vals_before = [random.random() for _ in range(5)]
         select_difficulty(seed=123)

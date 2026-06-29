@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for curation engine."""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
 from ultrawhale.curation import CurationEngine
 
 
@@ -16,10 +16,9 @@ class TestCurationEngine:
             engine = CurationEngine("fake-token")
             engine.client = mock_client
 
-            score = engine.judge_pair({
-                "user_message": "What is Python?",
-                "free_response": "Python is a programming language."
-            })
+            score = engine.judge_pair(
+                {"user_message": "What is Python?", "free_response": "Python is a programming language."}
+            )
             assert isinstance(score, float)
             assert 1.0 <= score <= 5.0
 
@@ -57,10 +56,7 @@ class TestCurationEngine:
         engine = CurationEngine("fake-token")
         engine.client = mock_client
 
-        result = engine.curate({
-            "user_message": "What is X?",
-            "free_response": "X is Y."
-        })
+        result = engine.curate({"user_message": "What is X?", "free_response": "X is Y."})
         assert result is None
 
     def test_curate_accepts_high_score(self):
@@ -73,7 +69,7 @@ class TestCurationEngine:
 
         pair = {
             "user_message": "What is a neural network?",
-            "free_response": "A neural network is a computational model inspired by biological neural networks."
+            "free_response": "A neural network is a computational model inspired by biological neural networks.",
         }
         result = engine.curate(pair)
         assert result is not None
@@ -87,7 +83,5 @@ class TestCurationEngine:
         engine = CurationEngine("fake-token")
         engine.client = mock_client
 
-        result = engine.curate({
-            "user_message": "Q", "free_response": "A"
-        })
+        result = engine.curate({"user_message": "Q", "free_response": "A"})
         assert result is not None

@@ -5,8 +5,6 @@
 Migrated from self-host-llm/hf_inference.py into the ultrawhale package.
 """
 
-from typing import Optional, Dict
-
 from ultrawhale.config import Config
 from ultrawhale.logging import get_logger
 
@@ -20,8 +18,8 @@ class HFInferenceClient:
     source of truth for credentials.
     """
 
-    MODELS: Dict[str, str] = {
-        "llama70b": "meta-llama/Meta-Llama-3-8B-Instruct",
+    MODELS: dict[str, str] = {
+        "llama8b": "meta-llama/Meta-Llama-3-8B-Instruct",
         "mixtral": "mistralai/Mistral-7B-Instruct-v0.3",
         "hermes": "HuggingFaceH4/zephyr-7b-beta",
         "kompress": "PeetPedro/kompress-v8",
@@ -30,7 +28,7 @@ class HFInferenceClient:
 
     HF_API_URL: str = "https://api-inference.huggingface.co/models/{model_id}/v1/chat/completions"
 
-    def __init__(self, api_token: Optional[str] = None) -> None:
+    def __init__(self, api_token: str | None = None) -> None:
         """Initialize the HF Inference client.
 
         Args:
@@ -46,8 +44,7 @@ class HFInferenceClient:
             cfg = Config()
             if not cfg.hf_token:
                 raise ValueError(
-                    "HF token is not available — set HF_TOKEN env var or "
-                    "provide an explicit api_token argument."
+                    "HF token is not available — set HF_TOKEN env var or provide an explicit api_token argument."
                 )
             self.token: str = cfg.hf_token
 
@@ -62,7 +59,7 @@ class HFInferenceClient:
         messages: list,
         model_key: str,
         max_tokens: int = 200,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Chat completion via HF direct inference API (no provider routing).
 
         Args:
@@ -73,15 +70,13 @@ class HFInferenceClient:
         Returns:
             The assistant message content, or ``None`` on failure.
         """
-        model_id: str = self.MODELS.get(model_key, self.MODELS["llama70b"])
+        model_id: str = self.MODELS.get(model_key, self.MODELS["llama8b"])
         url: str = self.HF_API_URL.format(model_id=model_id)
 
         try:
             import requests as req
         except ImportError:
-            logger.critical(
-                "requests library is not installed — run: pip install requests"
-            )
+            logger.critical("requests library is not installed — run: pip install requests")
             return None
 
         try:
@@ -107,9 +102,7 @@ class HFInferenceClient:
             )
             return content
         except req.exceptions.Timeout:
-            logger.warning(
-                "Chat request timed out (model=%s, url=%s)", model_key, url
-            )
+            logger.warning("Chat request timed out (model=%s, url=%s)", model_key, url)
             return None
         except req.exceptions.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else "unknown"
@@ -121,9 +114,7 @@ class HFInferenceClient:
             )
             return None
         except Exception as exc:
-            logger.error(
-                "Unexpected error in _chat (model=%s): %s", model_key, exc
-            )
+            logger.error("Unexpected error in _chat (model=%s): %s", model_key, exc)
             return None
 
     # ------------------------------------------------------------------
@@ -134,8 +125,8 @@ class HFInferenceClient:
         self,
         topic: str,
         question_type: str = "conceptual",
-        model_key: str = "llama70b",
-    ) -> Optional[str]:
+        model_key: str = "llama8b",
+    ) -> str | None:
         """Generate a question about *topic* via HF Inference API.
 
         Args:
@@ -147,19 +138,13 @@ class HFInferenceClient:
         Returns:
             The generated question text, or ``None`` on failure.
         """
-        prompts: Dict[str, str] = {
+        prompts: dict[str, str] = {
             "conceptual": (
                 f"Generate a clear, fundamental question about {topic}. "
                 "Focus on core concepts. Only output the question itself."
             ),
-            "practical": (
-                f"Generate a practical coding question related to {topic}. "
-                "Only output the question itself."
-            ),
-            "theoretical": (
-                f"Generate a theoretical question about {topic}. "
-                "Only output the question itself."
-            ),
+            "practical": (f"Generate a practical coding question related to {topic}. Only output the question itself."),
+            "theoretical": (f"Generate a theoretical question about {topic}. Only output the question itself."),
         }
         prompt: str = prompts.get(question_type, prompts["conceptual"])
         logger.info(
@@ -173,8 +158,8 @@ class HFInferenceClient:
     def answer_question(
         self,
         question: str,
-        model_key: str = "llama70b",
-    ) -> Optional[str]:
+        model_key: str = "llama8b",
+    ) -> str | None:
         """Generate an answer for a given question via HF Inference API.
 
         Args:
@@ -195,8 +180,8 @@ class HFInferenceClient:
         self,
         topic: str,
         question_type: str = "conceptual",
-        model_key: str = "llama70b",
-    ) -> Optional[tuple]:
+        model_key: str = "llama8b",
+    ) -> tuple | None:
         """Generate a full Q&A pair via HF Inference API.
 
         Args:

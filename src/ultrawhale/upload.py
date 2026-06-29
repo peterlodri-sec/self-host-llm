@@ -9,12 +9,10 @@ Rules:
   - Uploads one at a time with progress
 """
 
-import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from ultrawhale.config import Config
 from ultrawhale.logging import get_logger
@@ -22,7 +20,7 @@ from ultrawhale.logging import get_logger
 logger = get_logger("upload")
 
 try:
-    from huggingface_hub import HfApi, CommitOperationAdd
+    from huggingface_hub import CommitOperationAdd, HfApi
 except ImportError:
     logger.error("huggingface_hub not installed. Run: pip install huggingface_hub")
     sys.exit(1)
@@ -30,8 +28,8 @@ except ImportError:
 
 def upload_dogfeed(
     directory: Path,
-    hf_repo: Optional[str] = None,
-    hf_token: Optional[str] = None,
+    hf_repo: str | None = None,
+    hf_token: str | None = None,
     pattern: str = "dogfeed_*.jsonl",
     active_grace_minutes: int = 30,
     dry_run: bool = False,
@@ -125,14 +123,16 @@ def upload_dogfeed(
 
         try:
             content = f.read_bytes()
-            ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
             api.create_commit(
                 repo_id=repo,
                 repo_type="dataset",
-                operations=[CommitOperationAdd(
-                    path_in_repo=f.name,
-                    path_or_fileobj=content,
-                )],
+                operations=[
+                    CommitOperationAdd(
+                        path_in_repo=f.name,
+                        path_or_fileobj=content,
+                    )
+                ],
                 commit_message=f"upload: {f.name} (ultrawhale pipeline) [{ts}]",
                 token=token,
             )

@@ -8,8 +8,7 @@ timestamp, level, and component tagging across all modules.
 import json
 import logging
 import sys
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 
 class _StructuredFormatter(logging.Formatter):
@@ -17,7 +16,7 @@ class _StructuredFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         payload = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "component": getattr(record, "component", "ultrawhale"),
             "msg": record.getMessage(),
@@ -34,10 +33,10 @@ class _HumanFormatter(logging.Formatter):
     """
 
     COLORS = {
-        "DEBUG": "\033[2;37m",    # dim white
-        "INFO": "\033[0m",         # default
-        "WARNING": "\033[1;33m",   # yellow
-        "ERROR": "\033[1;31m",     # red
+        "DEBUG": "\033[2;37m",  # dim white
+        "INFO": "\033[0m",  # default
+        "WARNING": "\033[1;33m",  # yellow
+        "ERROR": "\033[1;31m",  # red
         "CRITICAL": "\033[1;35m",  # magenta
     }
     RESET = "\033[0m"
@@ -54,7 +53,7 @@ class _HumanFormatter(logging.Formatter):
 def setup_logging(
     level: int = logging.INFO,
     json_mode: bool = False,
-    component: Optional[str] = None,
+    component: str | None = None,
 ) -> logging.Logger:
     """Configure and return the root Ultrawhale logger.
 

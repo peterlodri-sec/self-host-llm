@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from ultrawhale import __version__
-from ultrawhale.logging import setup_logging, get_logger
+from ultrawhale.logging import get_logger, setup_logging
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
@@ -79,6 +79,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     # Check LLM server reachability
     try:
         import openai
+
         client = openai.OpenAI(base_url=f"{cfg.mistralrs_host}/v1", api_key="none")
         models = client.models.list()
         logger.info(f"LLM server reachable — {len(models.data) if hasattr(models, 'data') else '?'} models")

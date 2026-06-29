@@ -6,6 +6,7 @@ workers, monitoring resource usage with autoscaling, scheduling kompress
 post-processing, and aggregating results into HF-ready datasets.
 """
 
+import contextlib
 import os
 import signal
 import subprocess
@@ -14,7 +15,6 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from ultrawhale.config import Config
 from ultrawhale.logging import get_logger
@@ -23,7 +23,7 @@ logger = get_logger("orchestrator")
 
 # --- Optional dependencies ---
 try:
-    from ultrawhale.resources import ResourceManager, ProcessManager
+    from ultrawhale.resources import ProcessManager, ResourceManager
 except ImportError:
     logger.debug("resource_manager not available — resource limits disabled")
     ResourceManager = None  # type: ignore[assignment]
@@ -32,6 +32,7 @@ except ImportError:
 KOMPRESS_AVAILABLE = False
 try:
     from ultrawhale.kompress import compress_jsonl_file
+
     KOMPRESS_AVAILABLE = True
 except ImportError:
     logger.debug("kompress not available — compression disabled")
@@ -44,7 +45,7 @@ OUTPUT_DIR = cfg.output_dir
 MISTRALRS_MODEL = cfg.mistralrs_model
 MISTRALRS_HOST = cfg.mistralrs_host
 
-PARALLEL_WORKERS = 3
+PARALLEL_WORKERS = 5  # matches len(WORKERS_CONFIG)
 PAIRS_PER_WORKER = 5
 RETRY_INTERVAL = cfg.retry_interval
 ROUND_TIMEOUT = cfg.round_timeout
@@ -68,8 +69,7 @@ def _handle_shutdown(signum: int, frame) -> None:
     _shutdown_requested = True
 
 
-signal.signal(signal.SIGTERM, _handle_shutdown)
-signal.signal(signal.SIGINT, _handle_shutdown)
+# Signal handlers registered in __main__ block to avoid hijacking importers
 
 
 def setup_dirs() -> None:
@@ -87,12 +87,18 @@ def launch_worker(worker_id: int, config: dict) -> subprocess.Popen:
     model = config.get("model", MISTRALRS_MODEL)
     cmd = [
         sys.executable,
-        "-m", "ultrawhale.generate",
-        "--num", str(PAIRS_PER_WORKER),
-        "--category", config["category"],
-        "--model", model,
-        "--host", MISTRALRS_HOST,
-        "--output", str(output_file),
+        "-m",
+        "ultrawhale.generate",
+        "--num",
+        str(PAIRS_PER_WORKER),
+        "--category",
+        config["category"],
+        "--model",
+        model,
+        "--host",
+        MISTRALRS_HOST,
+        "--output",
+        str(output_file),
     ]
     logger.info(f"Worker-{worker_id} launching {config['topic_suffix']} ({model}) → {output_file.name}")
 
@@ -163,10 +169,8 @@ def aggregate_results() -> None:
         with open(file) as f:
             for line in f:
                 if line.strip():
-                    try:
+                    with contextlib.suppress(json.JSONDecodeError):
                         topic_data[topic].append(json.loads(line))
-                    except json.JSONDecodeError:
-                        pass
 
     for topic, data in topic_data.items():
         agg_file = SCRIPT_DIR / f"dogfeed_{topic}_aggregated.jsonl"
@@ -189,8 +193,8 @@ def run_fast_loop(rounds_per_cycle: int = 2) -> None:
     logger.info(f"Fast loop starting: {rounds_per_cycle} rounds × 10min, workers: {min_workers}-{max_workers}")
 
     # --- Resource manager ---
-    rm: Optional[ResourceManager] = None
-    pm: Optional[ProcessManager] = None
+    rm: ResourceManager | None = None
+    pm: ProcessManager | None = None
     if ResourceManager:
         rm = ResourceManager(
             max_memory_percent=cfg.max_memory_percent,
@@ -212,14 +216,14 @@ def run_fast_loop(rounds_per_cycle: int = 2) -> None:
         # --- Autoscaling ---
         if rm:
             status = rm.get_status()
-            if status.get("memory_percent", 0) < 40 and status.get("cpu_percent", 0) < 60:
-                if current_workers < max_workers:
-                    current_workers += 1
-                    logger.info(f"Autoscaler UP: {current_workers} workers")
-            elif status.get("memory_percent", 0) > 65 or status.get("cpu_percent", 0) > 85:
-                if current_workers > min_workers:
-                    current_workers -= 1
-                    logger.info(f"Autoscaler DOWN: {current_workers} workers")
+            mem = status.get("memory_percent", 0)
+            cpu = status.get("cpu_percent", 0)
+            if mem < 40 and cpu < 60 and current_workers < max_workers:
+                current_workers += 1
+                logger.info(f"Autoscaler UP: {current_workers} workers")
+            elif (mem > 65 or cpu > 85) and current_workers > min_workers:
+                current_workers -= 1
+                logger.info(f"Autoscaler DOWN: {current_workers} workers")
 
         for round_num in range(1, rounds_per_cycle + 1):
             if _shutdown_requested:
@@ -320,7 +324,6 @@ def run_parallel_loop(duration_hours: float = 24) -> None:
                         p.terminate()
                 break
             status = monitor_workers(processes)
-            completed = sum(1 for s in status.values() if s == "completed")
             time.sleep(10)
 
         status = monitor_workers(processes)
@@ -343,8 +346,12 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Ultrawhale parallel orchestrator")
-    parser.add_argument("--mode", choices=["fast", "parallel"], default="fast",
-                        help="Loop mode: fast (indefinite cycles) or parallel (fixed duration)")
+    parser.add_argument(
+        "--mode",
+        choices=["fast", "parallel"],
+        default="fast",
+        help="Loop mode: fast (indefinite cycles) or parallel (fixed duration)",
+    )
     parser.add_argument("--rounds", type=int, default=2, help="Rounds per cycle (fast mode)")
     parser.add_argument("--duration", type=float, default=24, help="Duration in hours (parallel mode)")
     parser.add_argument("--workers", type=int, default=5, help="Number of workers")
@@ -355,7 +362,11 @@ if __name__ == "__main__":
     PARALLEL_WORKERS = args.workers
 
     from ultrawhale.logging import setup_logging
+
     setup_logging(component="orchestrator")
+
+    signal.signal(signal.SIGTERM, _handle_shutdown)
+    signal.signal(signal.SIGINT, _handle_shutdown)
 
     if args.mode == "fast":
         run_fast_loop(args.rounds)

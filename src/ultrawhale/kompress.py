@@ -2,7 +2,6 @@
 """Post-processing: compress generated Q&A pairs with kompress-v8."""
 
 import json
-from typing import Optional
 
 from ultrawhale.config import Config
 from ultrawhale.logging import get_logger
@@ -21,13 +20,13 @@ class KompressClient:
 
     MODEL = "PeetPedro/kompress-v8"
 
-    def __init__(self, api_token: Optional[str] = None):
+    def __init__(self, api_token: str | None = None):
         self.token = api_token or Config().hf_token
         if not self.token:
             raise ValueError("HF_TOKEN not set — kompress requires HuggingFace authentication")
         self.client = InferenceClient(api_key=self.token)
 
-    def compress_text(self, text: str, max_tokens: int = 200) -> Optional[str]:
+    def compress_text(self, text: str, max_tokens: int = 200) -> str | None:
         """Compress text using kompress-v8."""
         try:
             prompt = f"Compress this concisely (max {max_tokens} tokens):\n{text}"
@@ -43,18 +42,23 @@ class KompressClient:
             return None
 
     def compress_qa_pair(self, question: str, answer: str) -> dict:
-        """Compress Q&A pair; keep originals if compression fails."""
+        """Compress Q&A pair; keep originals where compression fails."""
         q_compressed = self.compress_text(question, max_tokens=80)
         a_compressed = self.compress_text(answer, max_tokens=150)
 
+        q_ok = q_compressed is not None
+        a_ok = a_compressed is not None
+
         return {
-            "question": q_compressed or question,
-            "answer": a_compressed or answer,
-            "compressed": bool(q_compressed and a_compressed),
+            "question": q_compressed if q_ok else question,
+            "answer": a_compressed if a_ok else answer,
+            "compressed": q_ok and a_ok,
+            "q_compressed": q_ok,
+            "a_compressed": a_ok,
         }
 
 
-def compress_jsonl_file(input_file: str, output_file: str, api_token: Optional[str] = None) -> int:
+def compress_jsonl_file(input_file: str, output_file: str, api_token: str | None = None) -> int:
     """Compress all Q&A pairs in a JSONL file.
 
     Args:

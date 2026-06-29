@@ -2,10 +2,11 @@
 """Tests for upload module — non-destructive, idempotent HF upload."""
 
 import os
-import pytest
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
+import pytest
 
 from ultrawhale.upload import upload_dogfeed
 

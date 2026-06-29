@@ -3,7 +3,6 @@
 
 import os
 import time
-from typing import Optional
 
 import psutil
 
@@ -19,8 +18,8 @@ class ResourceManager:
 
     def __init__(
         self,
-        max_memory_percent: Optional[float] = None,
-        max_cpu_percent: Optional[float] = None,
+        max_memory_percent: float | None = None,
+        max_cpu_percent: float | None = None,
     ):
         """Initialize with resource limits (% of system total).
 
@@ -30,12 +29,8 @@ class ResourceManager:
             max_cpu_percent: CPU threshold. Falls back to
                 ``Config.max_cpu_percent`` (default 75).
         """
-        self.max_memory_percent = (
-            max_memory_percent if max_memory_percent is not None else cfg.max_memory_percent
-        )
-        self.max_cpu_percent = (
-            max_cpu_percent if max_cpu_percent is not None else cfg.max_cpu_percent
-        )
+        self.max_memory_percent = max_memory_percent if max_memory_percent is not None else cfg.max_memory_percent
+        self.max_cpu_percent = max_cpu_percent if max_cpu_percent is not None else cfg.max_cpu_percent
         self.pause_flag: bool = False
 
     def check_memory(self) -> bool:
@@ -127,9 +122,7 @@ class ProcessManager:
         self.processes: dict[int, psutil.Popen] = {}
         self.dead_workers: set[int] = set()
 
-    def launch_process(
-        self, worker_id: int, cmd: list[str], log_file: str
-    ) -> Optional[psutil.Popen]:
+    def launch_process(self, worker_id: int, cmd: list[str], log_file: str) -> psutil.Popen | None:
         """Launch a worker process with resource monitoring.
 
         Args:
@@ -158,9 +151,7 @@ class ProcessManager:
                 logger.warning("Could not inspect process limits: %s", e)
 
             self.processes[worker_id] = proc
-            logger.info(
-                "Worker %s launched (PID %s)", worker_id, proc.pid
-            )
+            logger.info("Worker %s launched (PID %s)", worker_id, proc.pid)
             return proc
 
         except Exception as e:
@@ -228,9 +219,7 @@ class ProcessManager:
                     p = psutil.Process(proc.pid)
                     stats["memory_mb"] += p.memory_info().rss / (1024**2)  # type: ignore[operator]
                 except Exception:
-                    logger.warning(
-                        "Could not read memory for worker %s", worker_id
-                    )
+                    logger.warning("Could not read memory for worker %s", worker_id)
             else:
                 stats["dead"] += 1  # type: ignore[operator]
         return stats

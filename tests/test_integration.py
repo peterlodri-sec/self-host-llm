@@ -2,40 +2,32 @@
 """Integration tests — mock LLM server testing of the full generation pipeline."""
 
 import json
-import pytest
 import threading
-import time
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from unittest.mock import patch
+
+import pytest
 
 from ultrawhale.scoring import reset_seen_hashes
 
 
 class MockLLMHandler(BaseHTTPRequestHandler):
-    """Mock LLM server returning canned responses."""
+    """Mock LLM server returning canned responses.
 
-    responses = iter([
-        # Q response: a question about algorithms
-        json.dumps({
-            "choices": [{"message": {"content": "What is the time complexity of binary search and why is it efficient?"}}]
-        }),
-        # A response: answer to that question
-        json.dumps({
-            "choices": [{"message": {"content": "Binary search has O(log n) time complexity because it halves the search space at each step. This makes it extremely efficient for sorted data."}}]
-        }),
-    ])
+    ``responses`` must be set by each test to an iterator of JSON strings
+    before starting the server.  Defaults to a single canned response.
+    """
+
+    responses: iter = iter([json.dumps({"choices": [{"message": {"content": "Default."}}]})])
 
     def do_POST(self):
         content_len = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_len)
+        _ = self.rfile.read(content_len)  # consume request body
 
         try:
             response = next(self.responses)
         except StopIteration:
-            response = json.dumps({
-                "choices": [{"message": {"content": "Default response."}}]
-            })
+            response = json.dumps({"choices": [{"message": {"content": "Default response."}}]})
 
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -76,14 +68,27 @@ class TestGenerateIntegration:
         output_file = tmp_path / "test_output.jsonl"
 
         # Reset mock responses
-        MockLLMHandler.responses = iter([
-            json.dumps({
-                "choices": [{"message": {"content": "What is a binary search tree and how does it work?"}}]
-            }),
-            json.dumps({
-                "choices": [{"message": {"content": "A binary search tree is a data structure where each node has at most two children. Left subtree contains smaller values, right subtree contains larger values."}}]
-            }),
-        ])
+        MockLLMHandler.responses = iter(
+            [
+                json.dumps(
+                    {"choices": [{"message": {"content": "What is a binary search tree and how does it work?"}}]}
+                ),
+                json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": (
+                                        "A binary search tree is a data structure where each node "
+                                        "has at most two children — smaller values left, larger right."
+                                    )
+                                }
+                            }
+                        ]
+                    }
+                ),
+            ]
+        )
 
         generate_dataset(
             model="qwen3.6-27b",
@@ -115,9 +120,15 @@ class TestGenerateMultiplePairs:
         # Build enough canned responses for 5 pairs (Q + A each = 10 responses)
         responses = []
         for i in range(10):
-            responses.append(json.dumps({
-                "choices": [{"message": {"content": f"Canned response number {i} for testing the generation loop."}}]
-            }))
+            responses.append(
+                json.dumps(
+                    {
+                        "choices": [
+                            {"message": {"content": f"Canned response number {i} for testing the generation loop."}}
+                        ]
+                    }
+                )
+            )
         MockLLMHandler.responses = iter(responses)
 
         generate_dataset(
@@ -130,7 +141,7 @@ class TestGenerateMultiplePairs:
         )
 
         assert output_file.exists()
-        lines = [l for l in output_file.read_text().strip().split("\n") if l]
+        lines = [line for line in output_file.read_text().strip().split("\n") if line]
         # Some pairs may be filtered by quality scoring — we should have at least 1
         assert len(lines) >= 1
 
