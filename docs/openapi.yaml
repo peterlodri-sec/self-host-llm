@@ -1,0 +1,358 @@
+openapi: "3.1.0"
+info:
+  title: Ultrawhale Dogfeed Pipeline — API Surface
+  version: 2.0.0
+  description: |
+    API surface for the Ultrawhale Dogfeed Pipeline.
+    Covers three layers: the CLI command interface, the local LLM
+    inference server (OpenAI-compatible), and the HuggingFace
+    dataset publishing API.
+
+servers:
+  - url: http://localhost:8080/v1
+    description: Local llama.cpp / OpenAI-compatible LLM server
+  - url: https://huggingface.co
+    description: HuggingFace API (dataset publishing + inference)
+
+paths:
+
+  # ── LLM Server (OpenAI-compatible) ────────────────────────
+  /v1/chat/completions:
+    post:
+      summary: Generate a text completion
+      description: |
+        OpenAI-compatible chat completion endpoint.
+        Used by the pipeline to generate Q&A pairs.
+      operationId: createChatCompletion
+      tags: [llm-server]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messages]
+              properties:
+                model:
+                  type: string
+                  example: qwen3.6-27b
+                messages:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      role:
+                        type: string
+                        enum: [system, user, assistant]
+                      content:
+                        type: string
+                stream:
+                  type: boolean
+                  default: false
+                max_tokens:
+                  type: integer
+                  default: 512
+                temperature:
+                  type: number
+                  default: 0.7
+      responses:
+        "200":
+          description: Successful completion
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  object:
+                    type: string
+                    default: chat.completion
+                  choices:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        index:
+                          type: integer
+                        message:
+                          type: object
+                          properties:
+                            role:
+                              type: string
+                            content:
+                              type: string
+                        finish_reason:
+                          type: string
+                  usage:
+                    type: object
+                    properties:
+                      prompt_tokens:
+                        type: integer
+                      completion_tokens:
+                        type: integer
+                      total_tokens:
+                        type: integer
+
+  /v1/models:
+    get:
+      summary: List available models
+      operationId: listModels
+      tags: [llm-server]
+      responses:
+        "200":
+          description: List of models
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        object:
+                          type: string
+
+  # ── HuggingFace Inference API ────────────────────────────
+  /{model}/v1/chat/completions:
+    parameters:
+      - name: model
+        in: path
+        required: true
+        schema:
+          type: string
+        description: HF model ID (e.g., meta-llama/Meta-Llama-3-8B-Instruct)
+    post:
+      summary: HF Inference chat completion (fallback)
+      operationId: hfChatCompletion
+      tags: [hf-inference]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messages]
+              properties:
+                messages:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      role:
+                        type: string
+                      content:
+                        type: string
+                max_tokens:
+                  type: integer
+                  default: 200
+                temperature:
+                  type: number
+                  default: 0.7
+      responses:
+        "200":
+          description: Successful inference
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  choices:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        message:
+                          type: object
+                          properties:
+                            content:
+                              type: string
+
+  # ── HuggingFace Dataset API ──────────────────────────────
+  /api/datasets/{owner}/{repo}:
+    get:
+      summary: Get dataset metadata
+      operationId: getDatasetInfo
+      tags: [hf-dataset]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+            default: PeetPedro
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+            default: ultrawhale-dogfood
+      responses:
+        "200":
+          description: Dataset metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  siblings:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        rfilename:
+                          type: string
+                        size:
+                          type: integer
+                  downloads:
+                    type: integer
+                  likes:
+                    type: integer
+
+  /api/datasets/{owner}/{repo}/resolve/main/{path}:
+    get:
+      summary: Download a specific dataset file
+      operationId: downloadDatasetFile
+      tags: [hf-dataset]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File content (JSONL or asset)
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    hfToken:
+      type: http
+      scheme: bearer
+      description: HuggingFace token (HF_TOKEN)
+
+x-cli-commands:
+  generate:
+    summary: Generate Q&A pairs
+    description: |
+      Run the core generation engine. Supports local LLM, HF fallback,
+      difficulty-aware sampling, and curated quality gating.
+    arguments:
+      --model:
+        type: string
+        default: qwen3.6-27b
+        description: Model name served by LLM server
+      --num:
+        type: integer
+        default: 100
+        description: Number of Q&A pairs to generate
+      --output:
+        type: string
+        default: dogfeed.jsonl
+        description: Output JSONL file path
+      --host:
+        type: string
+        default: http://localhost:8080
+        description: LLM server URL
+      --category:
+        type: string
+        enum: [all, cs, physics, hybrid]
+        default: all
+        description: Topic category
+      --hybrid:
+        type: boolean
+        default: false
+        description: Enable HF Inference fallback
+      --difficulty:
+        type: boolean
+        default: false
+        description: Enable difficulty-aware sampling
+      --hf-only:
+        type: boolean
+        default: false
+        description: Use HF Inference only (skip local LLM)
+      --skip-curation:
+        type: boolean
+        default: false
+        description: Skip LLM-judge curation phase
+    examples:
+      - ultrawhale generate --num 100 --category cs
+      - ultrawhale generate --num 500 --hybrid --difficulty
+      - ultrawhale generate --num 50 --hf-only --skip-curation
+
+  upload:
+    summary: Upload dogfeed files to HuggingFace
+    description: |
+      Non-destructive, idempotent upload. Never deletes local files.
+      Skips active/modified files, duplicates, and empty files.
+    arguments:
+      --dir:
+        type: string
+        default: "."
+        description: Directory containing dogfeed_*.jsonl files
+      --dry-run:
+        type: boolean
+        default: false
+        description: Show what would be uploaded without pushing
+      --active-grace:
+        type: integer
+        default: 30
+        description: Skip files modified within N minutes
+      --pattern:
+        type: string
+        default: dogfeed_*.jsonl
+        description: Glob pattern for local files
+    examples:
+      - ultrawhale upload
+      - ultrawhale upload --dir dogfeed_parallel --dry-run
+      - ultrawhale upload --active-grace 5
+
+  compress:
+    summary: Compress dogfeed files with kompress-v8
+    description: |
+      Post-processes generated JSONL files through the kompress-v8
+      compression model on HuggingFace.
+    arguments:
+      input:
+        type: string
+        required: true
+        description: Input JSONL file path
+      --output:
+        type: string
+        description: Output JSONL file (default: input_kompressed.jsonl)
+      --token:
+        type: string
+        description: HF_TOKEN override
+    examples:
+      - ultrawhale compress dogfeed_cs_2026-06-29.jsonl
+
+  status:
+    summary: Pipeline health check
+    description: |
+      Reports configuration, LLM server connectivity, and any
+      configuration warnings. Returns exit code 0 on success.
+    examples:
+      - ultrawhale status
+      - ultrawhale status --json-log

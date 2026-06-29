@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Sitemap: https://proposal.vaked.dev/sitemap.xml
+
+# Disallow raw asset paths from crawlers that don't need them
+Disallow: /dogfeed_parallel/
+Disallow: /ralph_logs/
+Disallow: /node_modules/

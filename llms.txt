@@ -1,0 +1,45 @@
+# Ultrawhale Dogfeed Pipeline
+
+## About
+High-throughput Q&A data synthesis pipeline for training LLMs. Self-hosted, SOTA, open-source — generates up to 7.2K+ validated Q&A pairs per day on a single MacBook.
+
+## Key links
+- GitHub: https://github.com/peterlodri-sec/ultrawhale-dogfood-pipeline
+- Dataset (HF): https://huggingface.co/datasets/PeetPedro/ultrawhale-dogfood
+- Architecture: docs/ARCHITECTURE.md
+- OpenAPI spec: docs/openapi.yaml
+- Disaster recovery: docs/disaster-recovery.md
+- Proposal site: https://proposal.vaked.dev
+
+## Quick start
+```bash
+git clone https://github.com/peterlodri-sec/ultrawhale-dogfood-pipeline.git
+cd ultrawhale-dogfood-pipeline
+pip install .
+ultrawhale generate --num 100 --category cs
+```
+
+## CLI
+- `ultrawhale generate` — generate Q&A pairs
+- `ultrawhale upload` — upload to HuggingFace
+- `ultrawhale compress` — kompress-v8 compression
+- `ultrawhale status` — health check
+
+## Configuration
+All via env vars: `LLM_HOST`, `LLM_MODEL`, `HF_TOKEN`, `LLAMA_SERVER_BIN`, `ULTRAWHALE_*`.
+
+## API
+- Local LLM server: `http://localhost:8080/v1/chat/completions` (OpenAI-compatible)
+- HF dataset API: `https://huggingface.co/api/datasets/PeetPedro/ultrawhale-dogfood`
+
+## Tests
+```bash
+pip install .[dev] && pytest
+```
+
+## License
+MIT — see LICENSE.
+
+## Related
+- kompress-ultra: context compression for LLMs
+- proposal.vaked.dev: full proposal site with OG/Twitter meta tags
