@@ -1,9 +1,14 @@
 # Ultrawhale Dogfeed Pipeline
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/logo.svg">
+  <img alt="Ultrawhale Dogfeed Pipeline" src="./assets/logo.svg" width="160" align="right">
+</picture>
+
 [![CI](https://github.com/peterlodri-sec/ultrawhale-dogfood-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/peterlodri-sec/ultrawhale-dogfood-pipeline/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/ultrawhale)](https://pypi.org/project/ultrawhale/)
-[![Python](https://img.shields.io/pypi/pyversions/ultrawhale)](https://pypi.org/project/ultrawhale/)
+[![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![HF Dataset](https://img.shields.io/badge/🤗%20dataset-PeetPedro/ultrawhale--dogfood-yellow)](https://huggingface.co/datasets/PeetPedro/ultrawhale-dogfood)
 
 **Industrial-grade Q&A data synthesis pipeline for training LLMs.**
 
@@ -12,8 +17,10 @@ Generates high-quality, LLM-judge-validated Q&A pairs at scale — up to 7,200+ 
 ## Quickstart
 
 ```bash
-# Install
-pip install ultrawhale
+# Install (from source)
+git clone https://github.com/peterlodri-sec/ultrawhale-dogfood-pipeline.git
+cd ultrawhale-dogfood-pipeline
+pip install .
 
 # Generate 100 Q&A pairs (requires a running llama.cpp server)
 ultrawhale generate --num 100 --category cs --host http://localhost:8080

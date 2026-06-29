@@ -95,4 +95,4 @@ git tag v2.0.0
 git push origin v2.0.0
 ```
 
-GitHub Actions builds, publishes to PyPI, and creates a GitHub Release automatically.
+GitHub Actions builds the package and creates a GitHub Release automatically.
