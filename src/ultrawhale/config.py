@@ -23,9 +23,7 @@ class Config:
     llm_host: str = field(
         default_factory=lambda: os.getenv("LLM_HOST", os.getenv("MISTRALRS_HOST", "http://localhost:8080"))
     )
-    llm_model: str = field(
-        default_factory=lambda: os.getenv("LLM_MODEL", os.getenv("MISTRALRS_MODEL", "qwen3.6-27b"))
-    )
+    llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", os.getenv("MISTRALRS_MODEL", "qwen3.6-27b")))
     llama_server_bin: str = field(
         default_factory=lambda: os.getenv("LLAMA_SERVER_BIN", "/opt/homebrew/bin/llama-server")
     )

@@ -24,6 +24,12 @@ Generates high-quality, LLM-judge-validated Q&A pairs at scale — up to 7,200+ 
 | 1,000 | 7.2M | 50.4M | 216M | 1.3B | 2.6B | 5.2B |
 
 > *"The best way to predict the future is to generate it."*
+>
+> **why?** I cannot explain it honestly, I don't know, this just feels cool to **me**,  
+> **anon + global + fully honest public datasetgen+dataset? please copy me ^^**  
+>
+> **SUPER-ULTRA-DEVELOPMENT-MODE** — this is the notice, call for action etc.  
+> I NEVER SAID ANYWHERE THAT THIS IS PERFECT. It's not. Help make it one.
 
 ## Live Stats — `PeetPedro/ultrawhale-dogfood`
 
