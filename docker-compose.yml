@@ -1,0 +1,28 @@
+services:
+  llama-server:
+    image: ghcr.io/ggerganov/llama.cpp:server
+    command: >
+      -m /models/qwen3.6-27b-q4_k_m.gguf
+      --host 0.0.0.0
+      --port 8080
+      -c 8192
+      -np 2
+      --cache-type-k q8_0
+    volumes:
+      - ./models:/models
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  orchestrator:
+    build: .
+    command: ["generate", "--num", "100", "--category", "cs"]
+    environment:
+      - MISTRALRS_HOST=http://llama-server:8080
+      - HF_TOKEN=${HF_TOKEN}
+    volumes:
+      - ./output:/app/dogfeed_parallel
+      - ./logs:/app/ralph_logs
+    depends_on:
+      - llama-server
+    restart: "no"

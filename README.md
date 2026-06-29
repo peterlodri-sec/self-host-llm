@@ -1,31 +1,106 @@
-# Ultrawhale Dogfeed Pipeline (v1.0.0)
+# Ultrawhale Dogfeed Pipeline
 
-High-throughput Q&A generation pipeline for training LLMs.
+[![CI](https://github.com/peterlodri-sec/ultrawhale-dogfood-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/peterlodri-sec/ultrawhale-dogfood-pipeline/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/ultrawhale)](https://pypi.org/project/ultrawhale/)
+[![Python](https://img.shields.io/pypi/pyversions/ultrawhale)](https://pypi.org/project/ultrawhale/)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+**Industrial-grade Q&A data synthesis pipeline for training LLMs.**
+
+Generates high-quality, LLM-judge-validated Q&A pairs at scale — up to 7,200+ pairs/day on a single M3 MacBook. Built for self-hosters and open-source contributors who want to produce training data they can trust.
+
+## Quickstart
+
+```bash
+# Install
+pip install ultrawhale
+
+# Generate 100 Q&A pairs (requires a running llama.cpp server)
+ultrawhale generate --num 100 --category cs --host http://localhost:8080
+
+# Check pipeline health
+ultrawhale status
+
+# Upload results to HuggingFace (requires HF_TOKEN)
+ultrawhale upload
+```
 
 ## Features
-- **Parallel Generation:** Multi-worker architecture using `ralph_parallel.py`.
-- **Async I/O:** Queue-based writer ensures generation is never blocked by disk I/O.
-- **Resource Management:** Automatic CPU/Memory monitoring to prevent system crashes.
-- **SOTA Inference:** Optimized `llama.cpp` server with quantized KV caching.
-- **Dynamic Autoscaling:** Automatic worker scaling (2-8) based on real-time resource load.
 
-## Getting Started
-1. Set `HF_TOKEN` in `.env`.
-2. Start the system:
-   ```bash
-   task run
-   ```
-3. Monitor logs with structure/color:
-   ```bash
-   task logs:pretty
-   ```
+- **Parallel Generation** — Multi-worker architecture with dynamic autoscaling (2-8 workers)
+- **Quality Gating** — Every pair scored on coherence, length, and diversity; LLM-judge validated
+- **HF Inference Fallback** — Low-quality local outputs automatically fall back to HF-hosted Llama70B
+- **Difficulty Sampling** — Active learning distributes questions across easy/medium/hard tiers
+- **Structured Logging** — JSON or human-readable, with per-component tagging
+- **Async I/O** — Queue-based writer ensures generation is never blocked by disk I/O
+- **Resource Management** — Automatic CPU/memory monitoring prevents system crashes
+- **Kompress-v8** — Post-processing compression for compact dataset storage
 
-## Tuning
-- **Parallelism:** Adjust `workers` and `pairs-per-worker` in `ralph_parallel.py`.
-- **Server:** See `llm-server.sh` for context window and cache settings.
+## Architecture
 
-## Autoscaling
-The pipeline dynamically scales workers based on resource usage. 
-- **Scale Up:** Memory < 40%, CPU < 60%.
-- **Scale Down:** Memory > 65%, CPU > 85%.
-- **Limits:** 2-8 workers.
+```
+┌──────────────────────────────────────────────────────┐
+│                    Orchestrator                       │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐              │
+│  │Worker 1 │  │Worker 2 │  │Worker N │  ...2-8      │
+│  │  (CS)   │  │(Physics)│  │(General)│              │
+│  └────┬────┘  └────┬────┘  └────┬────┘              │
+│       │            │            │                     │
+│       ▼            ▼            ▼                     │
+│  ┌─────────────────────────────────────┐             │
+│  │       Quality Scoring + Curation    │             │
+│  │  (coherence · length · diversity)   │             │
+│  └──────────────┬──────────────────────┘             │
+│                 │                                     │
+│                 ▼                                     │
+│  ┌─────────────────────────────────────┐             │
+│  │       Async Writer (JSONL)          │             │
+│  └──────────────┬──────────────────────┘             │
+│                 │                                     │
+│                 ▼                                     │
+│  ┌─────────────────────────────────────┐             │
+│  │    Kompress-v8 → HF Dataset Upload  │             │
+│  └─────────────────────────────────────┘             │
+└──────────────────────────────────────────────────────┘
+```
+
+## Configuration
+
+All settings are configured via environment variables — no config files needed.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HF_TOKEN` | — | HuggingFace API token (required for upload + HF inference) |
+| `MISTRALRS_HOST` | `http://localhost:8080` | LLM server URL |
+| `MISTRALRS_MODEL` | `qwen3.6-27b` | Model name served by the server |
+| `LLAMA_SERVER_BIN` | `/opt/homebrew/bin/llama-server` | llama.cpp binary path |
+| `ULTRAWHALE_MAX_WORKERS` | `8` | Maximum parallel workers |
+| `ULTRAWHALE_MIN_WORKERS` | `2` | Minimum parallel workers |
+| `ULTRAWHALE_MIN_SCORE` | `0.65` | Minimum quality score threshold |
+| `ULTRAWHALE_LOG_DIR` | `ralph_logs/` | Log output directory |
+| `ULTRAWHALE_OUTPUT_DIR` | `dogfeed_parallel/` | Dataset output directory |
+
+## Commands
+
+```bash
+ultrawhale generate   # Generate Q&A pairs
+ultrawhale upload     # Upload dogfeed to HuggingFace
+ultrawhale compress   # Post-process with kompress-v8
+ultrawhale status     # Pipeline health check
+```
+
+## Development
+
+```bash
+git clone https://github.com/peterlodri-sec/ultrawhale-dogfood-pipeline.git
+cd ultrawhale-dogfood-pipeline
+uv sync --all-extras
+uv run pytest
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for details on setup, workflow, and PR process.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for deep architecture details.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

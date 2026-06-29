@@ -1,0 +1,104 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ultrawhale"
+version = "2.0.0"
+description = "High-throughput Q&A generation pipeline for training LLMs — industrial-grade data synthesis"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.12"
+authors = [
+    {name = "Peter", email = "peter@lodri.cc"},
+]
+keywords = ["llm", "dataset", "synthesis", "qa-generation", "dogfeed", "finetuning"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "openai>=1.0",
+    "huggingface_hub>=0.23",
+    "psutil>=5.9",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-mock>=3.14",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+]
+merge = [
+    "datasets>=2.19",
+]
+all = [
+    "ultrawhale[dev,merge]",
+]
+
+[project.scripts]
+ultrawhale = "ultrawhale.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/peterlodri-sec/ultrawhale-dogfood-pipeline"
+Repository = "https://github.com/peterlodri-sec/ultrawhale-dogfood-pipeline"
+Issues = "https://github.com/peterlodri-sec/ultrawhale-dogfood-pipeline/issues"
+Changelog = "https://github.com/peterlodri-sec/ultrawhale-dogfood-pipeline/blob/main/CHANGELOG.md"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["_cold-archive", ".git", "__pycache__", "ralph_logs", "dogfeed_parallel"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "C4"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+warn_return_any = true
+warn_unused_configs = true
+exclude = ["_cold-archive", "ralph_logs", "dogfeed_parallel"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v --tb=short --cov=src/ultrawhale --cov-report=term-missing"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests (require mocked/external services)",
+    "requires_hf_token: marks tests that need HF_TOKEN set",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["src/ultrawhale"]
+omit = ["src/ultrawhale/__main__.py"]
+
+[tool.coverage.report]
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "def __repr__",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ultrawhale"]
