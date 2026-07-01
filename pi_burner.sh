@@ -129,7 +129,7 @@ find_sd_card() {
             exit 1
         fi
         # Verify it's not a disk image
-        if diskutil info "$sd_device" 2>/dev/null | grep -qiE "disk image|virtual"; then
+        if diskutil info "$sd_device" 2>/dev/null | grep -qi "disk image"; then
             echo "Error: '$sd_device' is a virtual/disk image, not an SD card."
             exit 1
         fi
