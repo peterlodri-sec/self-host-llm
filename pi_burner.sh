@@ -111,15 +111,26 @@ find_sd_card() {
     echo "Detecting SD card device..."
     
     if [[ "$(uname)" == "Darwin" ]]; then
-        # macOS: list disks, show external ones
-        echo "External disks on macOS:"
-        diskutil list external
+        # macOS: list only physical external disks (exclude disk images)
+        echo "External physical disks:"
+        diskutil list physical external 2>/dev/null | grep -E "^/dev/disk[0-9]"
         echo ""
-        echo "Enter SD card device (e.g., /dev/disk2):"
+        echo "Enter SD card device (e.g., /dev/disk2, NO disk images):"
         read -r sd_device
         if [[ ! -b "$sd_device" ]]; then
             echo "Error: Invalid device selected."
             exit 1
+        fi
+        # Confirm it's not a disk image
+        local disk_type
+        disk_type=$(diskutil info "$sd_device" 2>/dev/null | grep "Device Location" | awk '{print $NF}')
+        if [[ "$disk_type" == "Internal" ]]; then
+            echo "Warning: $sd_device is an internal disk, not an SD card!"
+            echo "Are you sure? (y/N)"
+            read -r confirm
+            if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+                exit 1
+            fi
         fi
     else
         # Linux: use lsblk
@@ -148,16 +159,31 @@ find_sd_card() {
 # Burn image to SD card
 burn_image() {
     local sd_device="$1"
-    echo "Writing image to SD card..."
-    sudo dd if="$IMG_UNCOMPRESSED" of="$sd_device" bs=4M status=progress oflag=sync
+    local dd_device="$sd_device"
+    
+    # macOS: use raw disk (rdisk) for faster writes, unmount first
+    if [[ "$(uname)" == "Darwin" ]]; then
+        echo "Unmounting disk (macOS)..."
+        sudo diskutil unmountDisk "$sd_device" 2>/dev/null || true
+        dd_device="/dev/r${sd_device#/dev/}"
+        echo "Using raw device: $dd_device"
+    fi
+    
+    echo "Writing image to SD card (pass 1/2)..."
+    sudo dd if="$IMG_UNCOMPRESSED" of="$dd_device" bs=4M status=progress oflag=sync
     echo "First write complete."
 }
 
 # Second burn for safety
 second_burn() {
     local sd_device="$1"
-    echo "Performing second write for safety..."
-    sudo dd if="$IMG_UNCOMPRESSED" of="$sd_device" bs=4M status=progress oflag=sync
+    local dd_device="$sd_device"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        dd_device="/dev/r${sd_device#/dev/}"
+    fi
+    
+    echo "Performing second write for safety (pass 2/2)..."
+    sudo dd if="$IMG_UNCOMPRESSED" of="$dd_device" bs=4M status=progress oflag=sync
     echo "Second write complete."
 }
 
