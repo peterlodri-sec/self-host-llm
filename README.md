@@ -170,6 +170,10 @@ MIT — see [LICENSE](LICENSE).
 
 ## Pi Dog Feeding Burner
 
+> ** NOTICE — E2E: Once you start a Pi with it, there is no SSH, no user access, no stopping it from outside.**
+> The Pi boots, verifies the dataset signature, and runs autonomously — feeding on schedule and uploading to HuggingFace.
+> To stop: disconnect power, remove SD card, run `/boot/erase_sd.sh` on another machine to wipe it.
+
 End-to-end dog feeding solution for Raspberry Pi 3B+. Burns a signed Pi OS image, configures GPIO motor/servo control, and uploads events + generated datasets to HuggingFace.
 
 ### Components
