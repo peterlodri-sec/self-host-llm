@@ -8,7 +8,7 @@
 [![CI](https://github.com/peterlodri-sec/ultrawhale-dogfood-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/peterlodri-sec/ultrawhale-dogfood-pipeline/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![HF Dataset](https://img.shields.io/badge/🤗%20dataset-PeetPedro/ultrawhale--dogfood-yellow)](https://huggingface.co/datasets/PeetPedro/ultrawhale-dogfood)
+[![HF Dataset](https://img.shields.io/badge/%20dataset-PeetPedro/ultrawhale--dogfood-yellow)](https://huggingface.co/datasets/PeetPedro/ultrawhale-dogfood)
 
 **Industrial-grade Q&A data synthesis pipeline for training LLMs.**
 
@@ -140,3 +140,44 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for deep architecture details.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+## Pi Dog Feeding Burner
+
+End-to-end solution for dog feeding using Raspberry Pi 3B+.
+
+### Features
+- Automated dog feeding schedule
+- GPIO control for motor/servo
+- Secure SD card burning with dataset signing
+- Headless operation (Ethernet only)
+- Secure erase functionality
+- HuggingFace dataset upload integration
+
+### Components
+1. **Pi Burner Script** (`pi_burner.sh`)
+   - Downloads latest Pi OS
+   - Signs dataset with SHA256
+   - Burns SD card with dual write
+   - Configures for dog feeding
+   - Adds erase + verify scripts
+
+2. **Dog Feeding Pipeline** (`src/ultrawhale/dog_feeding.py`)
+   - Scheduled feeding
+   - GPIO motor/servo control
+   - Dataset integrity verification
+   - HuggingFace event upload
+
+### Usage
+1. Insert SD card
+2. `./pi_burner.sh`
+3. Insert into Pi 3B+
+4. Power on — feeding starts automatically
+
+### Security
+- Dataset signed with SHA256
+- Integrity verified on boot
+- No SSH, no user accounts
+- Secure erase script included
+- Ethernet-only (WiFi/BT disabled)
