@@ -31,11 +31,19 @@ except ImportError:
 
 # ── HuggingFace ────────────────────────────────────────────────────────
 try:
-    from huggingface_hub import HfApi
+    from huggingface_hub import HfApi, InferenceClient
     HF_AVAILABLE = True
 except ImportError:
     HF_AVAILABLE = False
     print("huggingface_hub not installed — upload disabled")
+
+# ── OpenRouter ──────────────────────────────────────────────────────────
+try:
+    import openai
+    OPENROUTER_AVAILABLE = True
+except ImportError:
+    OPENROUTER_AVAILABLE = False
+    print("openai not installed — OpenRouter fallback disabled")
 
 # ── Paths ──────────────────────────────────────────────────────────────
 DATA_ROOT = "/var/lib/dogfeeding" if IS_PI else os.path.join(os.getcwd(), ".dogfeeding")
@@ -60,6 +68,8 @@ class DogFeedingPipeline:
 
         # HF init + bg upload scan
         self.hf_api: Optional[HfApi] = None
+        self.hf_inference: Optional[InferenceClient] = None
+        self.openrouter: Optional[openai.OpenAI] = None
         if HF_AVAILABLE:
             self._init_hf()
             self._scan_pending_uploads()
@@ -75,14 +85,29 @@ class DogFeedingPipeline:
 
     def _init_hf(self):
         token = os.environ.get("HF_TOKEN")
-        if not token:
-            self.logger.warning("HF_TOKEN not set — upload disabled")
-            return
-        try:
-            self.hf_api = HfApi(token=token)
-            self.logger.info("HuggingFace API ready")
-        except Exception as e:
-            self.logger.error(f"HuggingFace init failed: {e}")
+        if token:
+            try:
+                self.hf_api = HfApi(token=token)
+                self.hf_inference = InferenceClient(token=token)
+                self.logger.info("HuggingFace API + Inference ready")
+            except Exception as e:
+                self.logger.error(f"HuggingFace init failed: {e}")
+        else:
+            self.logger.warning("HF_TOKEN not set — upload + inference disabled")
+
+        # OpenRouter via openai-compatible client
+        or_key = os.environ.get("OPENROUTER_API_KEY")
+        if or_key and OPENROUTER_AVAILABLE:
+            try:
+                self.openrouter = openai.OpenAI(
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=or_key,
+                )
+                self.logger.info("OpenRouter client ready")
+            except Exception as e:
+                self.logger.error(f"OpenRouter init failed: {e}")
+        else:
+            self.logger.warning("OPENROUTER_API_KEY not set — OpenRouter fallback disabled")
 
     def _scan_pending_uploads(self):
         """Scan telemetry + dataset dirs. Spawn bg uploader if files found."""
@@ -239,14 +264,56 @@ class DogFeedingPipeline:
             return False
 
     def _generate_dataset_batch(self) -> List[Dict]:
-        """Stub: generate or download a dataset batch. Replace with real logic."""
-        topics = ["physics", "math", "cs", "biology"]
-        return [
-            {"question": f"Explain {random.choice(topics)} concept #{i}",
-             "answer": f"This is a generated answer for concept #{i}.",
-             "difficulty": random.choice(["easy", "medium", "hard"])}
-            for i in range(random.randint(3, 8))
-        ]
+        """Generate Q&A pairs via HF Inference or OpenRouter fallback."""
+        topics = ["physics", "math", "computer science", "biology", "chemistry",
+                  "history", "philosophy", "engineering", "linguistics", "economics"]
+        topic = random.choice(topics)
+        n_pairs = random.randint(3, 6)
+
+        prompt = (
+            f"Generate {n_pairs} diverse question-answer pairs about {topic}. "
+            "Return valid JSON array only, no markdown. "
+            "Each item: {\"question\": \"...\", \"answer\": \"...\", \"difficulty\": \"easy|medium|hard\"}. "
+            "Questions should test real understanding, not trivia. "
+            "Answers should be 1-3 sentences, educational, correct."
+        )
+
+        # Try HF Inference first
+        if self.hf_inference:
+            try:
+                resp = self.hf_inference.chat_completion(
+                    model="Qwen/Qwen2.5-1.5B-Instruct",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=2048,
+                    temperature=0.8,
+                )
+                content = resp.choices[0].message.content
+                parsed = json.loads(content)
+                if isinstance(parsed, list) and len(parsed) > 0:
+                    self.logger.info(f"HF gen OK: {len(parsed)} pairs on {topic}")
+                    return parsed
+            except Exception as e:
+                self.logger.warning(f"HF inference failed: {e}")
+
+        # Fallback: OpenRouter
+        if self.openrouter:
+            try:
+                resp = self.openrouter.chat.completions.create(
+                    model="openrouter/auto",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=2048,
+                    temperature=0.8,
+                )
+                content = resp.choices[0].message.content
+                parsed = json.loads(content)
+                if isinstance(parsed, list) and len(parsed) > 0:
+                    self.logger.info(f"OpenRouter gen OK: {len(parsed)} pairs on {topic}")
+                    return parsed
+            except Exception as e:
+                self.logger.warning(f"OpenRouter inference failed: {e}")
+
+        self.logger.warning("All inference backends failed — no dataset this cycle")
+        return []
 
     def run_scheduler(self):
         """Main loop. On Pi: feed + generate datasets. Off Pi: generate datasets."""
