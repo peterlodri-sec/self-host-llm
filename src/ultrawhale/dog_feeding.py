@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Dog Feeding Pipeline for Raspberry Pi
-Controls motor and servo for scheduled dog feeding.
+Dog Feeding Pipeline — Pi feeding + generic dataset loop.
+Same bg upload pattern on any machine.
 """
 
 import time
@@ -11,49 +11,39 @@ import os
 import subprocess
 import threading
 import glob
+import random
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
-# Try to import RPi.GPIO, fallback to mock if not available
+# ── GPIO: real on Pi, mock elsewhere ──────────────────────────────────
 try:
     import RPi.GPIO as GPIO
-    GPIO_AVAILABLE = True
+    IS_PI = True
 except ImportError:
-    # Mock GPIO for testing
     class MockGPIO:
-        BCM = "BCM"
-        OUT = "OUT"
-        HIGH = "HIGH"
-        LOW = "LOW"
-        
-        def setmode(self, mode):
-            pass
-            
-        def setup(self, pin, mode):
-            pass
-            
-        def output(self, pin, value):
-            pass
-            
-        def cleanup(self):
-            pass
-    
+        BCM = "BCM"; OUT = "OUT"; HIGH = "HIGH"; LOW = "LOW"
+        def setmode(self, _): pass
+        def setup(self, _, __): pass
+        def output(self, _, __): pass
+        def cleanup(self): pass
     GPIO = MockGPIO()
-    GPIO_AVAILABLE = False
+    IS_PI = False
 
-# HuggingFace imports
+# ── HuggingFace ────────────────────────────────────────────────────────
 try:
-    from huggingface_hub import HfApi, HfFileSystem
+    from huggingface_hub import HfApi
     HF_AVAILABLE = True
 except ImportError:
     HF_AVAILABLE = False
-    print("HuggingFace client not available")
+    print("huggingface_hub not installed — upload disabled")
 
-# Configuration
-CONFIG_PATH = "/boot/dog_feeding.conf"
-LOG_FILE = "/var/log/dog_feeding.log"
-LOCAL_TELEMETRY_DIR = "/var/lib/dogfeeding/telemetry"
-LOCAL_DATASET_DIR = "/var/lib/dogfeeding/datasets"
+# ── Paths ──────────────────────────────────────────────────────────────
+DATA_ROOT = "/var/lib/dogfeeding" if IS_PI else os.path.join(os.getcwd(), ".dogfeeding")
+CONFIG_PATH = "/boot/dog_feeding.conf" if IS_PI else os.path.join(DATA_ROOT, "dog_feeding.conf")
+LOG_FILE = "/var/log/dog_feeding.log" if IS_PI else os.path.join(DATA_ROOT, "dog_feeding.log")
+LOCAL_TELEMETRY_DIR = os.path.join(DATA_ROOT, "telemetry")
+LOCAL_DATASET_DIR = os.path.join(DATA_ROOT, "datasets")
+
 
 class DogFeedingPipeline:
     def __init__(self):
@@ -62,310 +52,244 @@ class DogFeedingPipeline:
         self.motor_pin = int(self.config.get("motor_pin", 18))
         self.servo_pin = int(self.config.get("servo_pin", 12))
         self.schedule_interval = int(self.config.get("schedule_interval_minutes", 30)) * 60
-        
-        # Verify dataset integrity
-        if not self._verify_dataset():
+
+        # Dataset integrity verify (Pi only)
+        if IS_PI and not self._verify_dataset():
             self.logger.error("Dataset verification failed. Aborting.")
             raise RuntimeError("Dataset integrity check failed")
-        
-        # Initialize HF if available
-        self.hf_api = None
-        self._upload_queue: List[str] = []
+
+        # HF init + bg upload scan
+        self.hf_api: Optional[HfApi] = None
         if HF_AVAILABLE:
             self._init_hf()
             self._scan_pending_uploads()
-        
-        if GPIO_AVAILABLE:
+
+        if IS_PI:
             GPIO.setmode(GPIO.BCM)
             GPIO.setup(self.motor_pin, GPIO.OUT)
             GPIO.setup(self.servo_pin, GPIO.OUT)
-            
+
+        self.logger.info(f"Pipeline initialized — mode: {'Pi' if IS_PI else 'generic'}")
+
+    # ── HF / Upload ─────────────────────────────────────────────────────
+
     def _init_hf(self):
-        """Initialize HuggingFace API client."""
+        token = os.environ.get("HF_TOKEN")
+        if not token:
+            self.logger.warning("HF_TOKEN not set — upload disabled")
+            return
         try:
-            # Try to get token from environment
-            hf_token = os.environ.get("HF_TOKEN")
-            if not hf_token:
-                self.logger.warning("HF_TOKEN not found in environment")
-                return
-                
-            self.hf_api = HfApi(token=hf_token)
-            self.logger.info("HuggingFace API initialized")
+            self.hf_api = HfApi(token=token)
+            self.logger.info("HuggingFace API ready")
         except Exception as e:
-            self.logger.error(f"HuggingFace initialization failed: {e}")
+            self.logger.error(f"HuggingFace init failed: {e}")
 
     def _scan_pending_uploads(self):
-        """Scan local telemetry + dataset dirs. Spawn bg upload thread if anything found."""
+        """Scan telemetry + dataset dirs. Spawn bg uploader if files found."""
         os.makedirs(LOCAL_TELEMETRY_DIR, exist_ok=True)
         os.makedirs(LOCAL_DATASET_DIR, exist_ok=True)
 
-        pending = []
+        pending: List[str] = []
         pending += glob.glob(os.path.join(LOCAL_TELEMETRY_DIR, "*.jsonl"))
         pending += glob.glob(os.path.join(LOCAL_DATASET_DIR, "*.jsonl"))
         pending += glob.glob(os.path.join(LOCAL_DATASET_DIR, "*.json"))
 
         if not pending:
-            self.logger.info("No pending uploads found")
+            self.logger.info("No pending files to upload")
             return
 
-        self.logger.info(f"Found {len(pending)} pending files (telemetry + datasets). Starting upload thread...")
-        thread = threading.Thread(
-            target=self._upload_pending_worker,
-            args=(pending,),
-            daemon=True,
-            name="hf-uploader"
-        )
-        thread.start()
+        self.logger.info(f"Found {len(pending)} pending file(s) — spawning upload thread")
+        t = threading.Thread(target=self._upload_worker, args=(pending,), daemon=True, name="hf-uploader")
+        t.start()
 
-    def _upload_pending_worker(self, files: List[str]):
-        """Bg thread: upload pending telemetry + datasets, delete on success."""
-        self.logger.info(f"Upload worker: processing {len(files)} files")
-        for filepath in sorted(files):
+    def _upload_worker(self, files: List[str]):
+        """Bg thread: upload each file to HF, delete on success."""
+        for fp in sorted(files):
             try:
-                with open(filepath, 'r') as f:
+                with open(fp) as f:
                     content = f.read()
+                fname = os.path.basename(fp)
 
-                device_id = "dogfeeder-001"
+                # Route to telemetry/ or datasets/ in HF
+                root = os.path.dirname(os.path.abspath(fp)).rstrip("/")
                 ts = datetime.now().isoformat().replace(":", "-").replace(".", "-")
-                fname = os.path.basename(filepath)
-                dirname = os.path.dirname(filepath)
-
-                # Determine target path based on source directory
-                if dirname.rstrip("/") == LOCAL_DATASET_DIR.rstrip("/"):
-                    target = f"datasets/pi_{device_id}_{ts}_{fname}"
+                if root == os.path.abspath(LOCAL_DATASET_DIR).rstrip("/"):
+                    target = f"datasets/pi_{ts}_{fname}"
                 else:
-                    target = f"telemetry/pi_{device_id}_{ts}_{fname}"
+                    target = f"telemetry/pi_{ts}_{fname}"
 
-                repo_id = "PeetPedro/ultrawhale-dogfood"
                 self.hf_api.upload_file(
                     path_or_fileobj=content.encode(),
                     path_in_repo=target,
-                    repo_id=repo_id,
-                    repo_type="dataset"
+                    repo_id="PeetPedro/ultrawhale-dogfood",
+                    repo_type="dataset",
                 )
-
-                os.remove(filepath)
+                os.remove(fp)
                 self.logger.info(f"Uploaded + removed: {fname} → {target}")
-
             except Exception as e:
-                self.logger.error(f"Failed to upload pending {filepath}: {e}")
+                self.logger.error(f"Upload failed for {fp}: {e}")
 
-        self.logger.info("Upload worker: done")
-    
+    # ── Dataset verify (Pi only) ────────────────────────────────────────
+
     def _verify_dataset(self) -> bool:
-        """Verify dataset integrity using embedded signature."""
-        self.logger.info("Verifying dataset integrity...")
-        
         try:
-            # Run verification script
-            result = subprocess.run(
-                ["/boot/verify_dataset.sh"],
-                capture_output=True,
-                text=True,
-                check=False
-            )
-            
-            if result.returncode == 0:
-                self.logger.info("Dataset verified successfully")
+            r = subprocess.run(["/boot/verify_dataset.sh"], capture_output=True, text=True)
+            if r.returncode == 0:
+                self.logger.info("Dataset integrity OK")
                 return True
-            else:
-                self.logger.error(f"Dataset verification failed: {result.stderr}")
-                return False
-                
-        except Exception as e:
-            self.logger.error(f"Dataset verification error: {e}")
+            self.logger.error(f"Dataset verify failed: {r.stderr}")
             return False
-    
-    def _load_config(self) -> Dict[str, Any]:
-        """Load configuration from file."""
-        default_config = {
-            "device_id": "dogfeeder-001",
-            "motor_pin": 18,
-            "servo_pin": 12,
-            "schedule_interval_minutes": 30,
-            "log_level": "INFO"
-        }
-        
-        if not os.path.exists(CONFIG_PATH):
-            self.logger.warning(f"Config file {CONFIG_PATH} not found, using defaults")
-            return default_config
-            
-        try:
-            with open(CONFIG_PATH, 'r') as f:
-                config = json.load(f)
-                # Merge with defaults
-                for key, value in default_config.items():
-                    if key not in config:
-                        config[key] = value
-                return config
         except Exception as e:
-            self.logger.error(f"Failed to load config: {e}")
-            return default_config
-    
-    def _setup_logger(self) -> logging.Logger:
-        """Setup logger."""
-        logger = logging.getLogger("DogFeeding")
-        logger.setLevel(getattr(logging, self.config.get("log_level", "INFO")))
-        
-        # Create logs directory if it doesn't exist
-        os.makedirs("/var/log", exist_ok=True)
-        
-        handler = logging.FileHandler(LOG_FILE)
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        
-        return logger
-    
-    def _upload_to_hf(self, event_data: dict):
-        """Upload event data to HuggingFace dataset. Falls back to local file."""
-        if not HF_AVAILABLE or not self.hf_api:
-            self.logger.debug("HuggingFace not available, saving locally")
-            self._save_local_event(event_data)
-            return
+            self.logger.error(f"Dataset verify error: {e}")
+            return False
 
+    # ── Config / Logging ─────────────────────────────────────────────────
+
+    def _load_config(self) -> Dict[str, Any]:
+        defaults = dict(device_id="dogfeeder-001", motor_pin=18, servo_pin=12,
+                        schedule_interval_minutes=30, log_level="INFO")
+        if not os.path.exists(CONFIG_PATH):
+            self.logger.warning("Config not found, using defaults")
+            return defaults
         try:
-            device_id = self.config.get("device_id", "dogfeeder-001")
-            timestamp = datetime.now().isoformat()
-            safe_ts = timestamp.replace(":", "-").replace(".", "-")
+            with open(CONFIG_PATH) as f:
+                cfg = json.load(f)
+            defaults.update(cfg)
+            return defaults
+        except Exception as e:
+            self.logger.error(f"Config load error: {e}")
+            return defaults
 
-            record = {
-                "timestamp": timestamp,
-                "event_type": event_data.get("type", "unknown"),
-                "device_id": device_id,
-                "details": event_data
-            }
+    def _setup_logger(self) -> logging.Logger:
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        log = logging.getLogger("DogFeeding")
+        log.setLevel(getattr(logging, self.config.get("log_level", "INFO")))
+        h = logging.FileHandler(LOG_FILE)
+        h.setFormatter(logging.Formatter("%(asctime)s — %(name)s — %(levelname)s — %(message)s"))
+        log.addHandler(h)
+        return log
 
-            repo_id = "PeetPedro/ultrawhale-dogfood"
-            path = f"telemetry/pi_{device_id}_{safe_ts}.jsonl"
-            content = json.dumps(record) + "\n"
+    # ── Upload helpers ──────────────────────────────────────────────────
 
-            # Try HF upload
+    def _upload_to_hf(self, event_data: dict):
+        """Try HF upload; fallback to local file for bg retry."""
+        if not self.hf_api:
+            self._save_local("event", event_data, LOCAL_TELEMETRY_DIR)
+            return
+        try:
+            dev = self.config.get("device_id", "dogfeeder-001")
+            ts = datetime.now().isoformat().replace(":", "-").replace(".", "-")
+            rec = {"timestamp": datetime.now().isoformat(),
+                   "event_type": event_data.get("type", "unknown"),
+                   "device_id": dev, "details": event_data}
+            content = json.dumps(rec) + "\n"
+            path = f"telemetry/pi_{dev}_{ts}.jsonl"
             self.hf_api.upload_file(
                 path_or_fileobj=content.encode(),
                 path_in_repo=path,
-                repo_id=repo_id,
-                repo_type="dataset"
+                repo_id="PeetPedro/ultrawhale-dogfood",
+                repo_type="dataset",
             )
-
-            self.logger.info(f"HuggingFace upload successful: {path}")
-
+            self.logger.info(f"HF upload OK: {path}")
         except Exception as e:
-            self.logger.warning(f"HuggingFace upload failed: {e}. Saving locally.")
-            self._save_local_event(event_data)
+            self.logger.warning(f"HF upload failed ({e}), saving locally")
+            self._save_local("event", event_data, LOCAL_TELEMETRY_DIR)
 
-    def _save_local_event(self, event_data: dict):
-        """Write event to local file for later upload."""
-        os.makedirs(LOCAL_TELEMETRY_DIR, exist_ok=True)
+    def _save_local(self, prefix: str, data: dict, directory: str):
+        os.makedirs(directory, exist_ok=True)
         ts = datetime.now().isoformat().replace(":", "-").replace(".", "-")
-        device_id = self.config.get("device_id", "dogfeeder-001")
-        fname = f"event_{device_id}_{ts}.jsonl"
-        fpath = os.path.join(LOCAL_TELEMETRY_DIR, fname)
+        dev = self.config.get("device_id", "dogfeeder-001")
+        fp = os.path.join(directory, f"{prefix}_{dev}_{ts}.jsonl")
+        with open(fp, "w") as f:
+            f.write(json.dumps({"timestamp": datetime.now().isoformat(),
+                                "device_id": dev, **data}) + "\n")
+        self.logger.info(f"Saved locally: {fp}")
 
-        record = {
-            "timestamp": datetime.now().isoformat(),
-            "event_type": event_data.get("type", "unknown"),
-            "device_id": device_id,
-            "details": event_data
-        }
-
-        with open(fpath, 'w') as f:
-            f.write(json.dumps(record) + "\n")
-
-        self.logger.info(f"Saved local event: {fpath}")
-
-    def save_dataset(self, data: List[Dict], name: str = None):
-        """Save a generated dataset locally for later upload."""
+    def save_dataset(self, records: List[Dict], name: Optional[str] = None):
+        """Save dataset locally for bg upload on next start."""
         os.makedirs(LOCAL_DATASET_DIR, exist_ok=True)
         ts = datetime.now().isoformat().replace(":", "-").replace(".", "-")
-        device_id = self.config.get("device_id", "dogfeeder-001")
-        label = name or "dataset"
-        fname = f"{label}_{device_id}_{ts}.jsonl"
-        fpath = os.path.join(LOCAL_DATASET_DIR, fname)
+        dev = self.config.get("device_id", "dogfeeder-001")
+        fp = os.path.join(LOCAL_DATASET_DIR, f"{name or 'dataset'}_{dev}_{ts}.jsonl")
+        with open(fp, "w") as f:
+            for rec in records:
+                f.write(json.dumps(rec) + "\n")
+        self.logger.info(f"Dataset saved ({len(records)} records): {fp}")
+        return fp
 
-        with open(fpath, 'w') as f:
-            for record in data:
-                f.write(json.dumps(record) + "\n")
+    # ── Feeding (Pi) / Generic loop (non-Pi) ────────────────────────────
 
-        self.logger.info(f"Saved local dataset ({len(data)} records): {fpath}")
-        return fpath
-    
     def feed_dog(self) -> bool:
-        """Execute one feeding cycle."""
-        self.logger.info("Starting feeding cycle")
-        
-        # Prepare event data
-        event_data = {
-            "type": "feeding_cycle",
-            "motor_pin": self.motor_pin,
-            "servo_pin": self.servo_pin
-        }
-        
+        """One feeding cycle (real GPIO on Pi, mock elsewhere)."""
+        ev = {"type": "feeding_cycle", "motor_pin": self.motor_pin, "servo_pin": self.servo_pin}
         try:
-            # Turn on motor for 2 seconds
-            if GPIO_AVAILABLE:
-                GPIO.output(self.motor_pin, GPIO.HIGH)
-                time.sleep(2)
+            if IS_PI:
+                GPIO.output(self.motor_pin, GPIO.HIGH); time.sleep(2)
                 GPIO.output(self.motor_pin, GPIO.LOW)
-                
-                # Move servo to position
-                # This is a simplified servo control
-                # In reality, you'd use PWM for precise control
-                GPIO.output(self.servo_pin, GPIO.HIGH)
-                time.sleep(0.5)
+                GPIO.output(self.servo_pin, GPIO.HIGH); time.sleep(0.5)
                 GPIO.output(self.servo_pin, GPIO.LOW)
-            
-            self.logger.info("Feeding cycle completed successfully")
-            event_data["status"] = "success"
-            
-            # Upload to HuggingFace
-            self._upload_to_hf(event_data)
-            
+            ev["status"] = "success"
+            self.logger.info("Feed OK")
+            self._upload_to_hf(ev)
             return True
-            
         except Exception as e:
-            self.logger.error(f"Feeding cycle failed: {e}")
-            event_data["status"] = "failed"
-            event_data["error"] = str(e)
-            
-            # Upload error event
-            self._upload_to_hf(event_data)
+            ev["status"] = "failed"; ev["error"] = str(e)
+            self.logger.error(f"Feed failed: {e}")
+            self._upload_to_hf(ev)
             return False
-    
+
+    def _generate_dataset_batch(self) -> List[Dict]:
+        """Stub: generate or download a dataset batch. Replace with real logic."""
+        topics = ["physics", "math", "cs", "biology"]
+        return [
+            {"question": f"Explain {random.choice(topics)} concept #{i}",
+             "answer": f"This is a generated answer for concept #{i}.",
+             "difficulty": random.choice(["easy", "medium", "hard"])}
+            for i in range(random.randint(3, 8))
+        ]
+
     def run_scheduler(self):
-        """Run the feeding scheduler."""
-        self.logger.info("Starting feeding scheduler")
-        
-        while True:
-            try:
-                self.logger.info(f"Waiting {self.schedule_interval} seconds for next feeding")
-                time.sleep(self.schedule_interval)
-                self.feed_dog()
-            except KeyboardInterrupt:
-                self.logger.info("Scheduler stopped by user")
-                break
-            except Exception as e:
-                self.logger.error(f"Scheduler error: {e}")
-                time.sleep(60)  # Wait 1 minute before retry
-    
+        """Main loop. Pi: feed on schedule. Non-Pi: generate dataset + upload."""
+        if IS_PI:
+            self.logger.info("Pi mode — feeding loop")
+            while True:
+                try:
+                    self.logger.info(f"Next feed in {self.schedule_interval}s")
+                    time.sleep(self.schedule_interval)
+                    self.feed_dog()
+                except KeyboardInterrupt:
+                    break
+                except Exception as e:
+                    self.logger.error(f"Loop error: {e}")
+                    time.sleep(60)
+        else:
+            self.logger.info("Generic mode — continuous dataset download/generate + upload")
+            while True:
+                try:
+                    data = self._generate_dataset_batch()
+                    self.save_dataset(data)
+                    self.logger.info(f"Next batch in {self.schedule_interval}s")
+                    time.sleep(self.schedule_interval)
+                except KeyboardInterrupt:
+                    break
+                except Exception as e:
+                    self.logger.error(f"Loop error: {e}")
+                    time.sleep(60)
+
     def cleanup(self):
-        """Cleanup GPIO resources."""
-        if GPIO_AVAILABLE:
+        if IS_PI:
             GPIO.cleanup()
 
+
 def main():
-    """Main entry point."""
     try:
-        pipeline = DogFeedingPipeline()
-        pipeline.run_scheduler()
+        p = DogFeedingPipeline()
+        p.run_scheduler()
     except RuntimeError as e:
-        print(f"Fatal error: {e}")
-        exit(1)
+        print(f"Fatal: {e}"); exit(1)
     except Exception as e:
-        print(f"Unexpected error: {e}")
-        exit(1)
+        print(f"Error: {e}"); exit(1)
+
 
 if __name__ == "__main__":
     main()
